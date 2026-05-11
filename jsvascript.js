@@ -16,12 +16,12 @@ async function initCamera() {
 
   mediaRecorder = new MediaRecorder(stream);
 
-  // Elke chunk opslaan
+  // Chunks opslaan
   mediaRecorder.ondataavailable = (e) => {
     chunks.push(e.data);
   };
 
-  // Wanneer opname stopt → video maken → uploaden
+  // Wanneer opname stopt → uploaden
   mediaRecorder.onstop = async () => {
     const blob = new Blob(chunks, { type: "video/webm" });
     chunks = [];
