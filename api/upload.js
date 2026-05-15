@@ -4,7 +4,7 @@ import fs from "fs";
 
 export const config = {
   api: {
-    bodyParser: false,
+    bodyParser: false, // belangrijk voor video uploads
   },
 };
 
@@ -17,7 +17,7 @@ export default async function handler(req, res) {
 
   form.parse(req, async (err, fields, files) => {
     if (err) {
-      console.error(err);
+      console.error("Form parse error:", err);
       return res.status(500).json({ error: "Form parse error" });
     }
 
@@ -26,8 +26,10 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "No video file" });
     }
 
+    // Lees de video in als buffer
     const videoBuffer = fs.readFileSync(videoFile.filepath);
 
+    // Railway connectie
     const client = new Client({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
@@ -35,16 +37,20 @@ export default async function handler(req, res) {
 
     try {
       await client.connect();
+
+      // INSERT in jouw tabel "videos"
       await client.query(
         "INSERT INTO videos (file) VALUES ($1)",
         [videoBuffer]
       );
+
       await client.end();
 
-      return res.status(200).json({ ok: true });
-    } catch (e) {
-      console.error(e);
-      return res.status(500).json({ error: "DB error" });
+      return res.status(200).json({ success: true });
+    } catch (error) {
+      console.error("Database insert error:", error);
+      return res.status(500).json({ error: "Database insert error" });
     }
   });
 }
+
