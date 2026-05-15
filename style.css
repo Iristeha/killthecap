@@ -10,8 +10,10 @@ body {
   font-family: "Poppins", sans-serif;
   height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 20px;
 }
 
 #mirror-container {
@@ -31,65 +33,10 @@ body {
   transform: scaleX(-1);
 }
 
-.blurred {
-  filter: blur(10px);
+button {
+  padding: 12px 24px;
+  font-size: 18px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
 }
-
-#overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 2rem;
-  text-align: center;
-  pointer-events: none;
-  background: radial-gradient(circle at center, rgba(0,0,0,0.4), rgba(0,0,0,0.8));
-}
-
-#overlay-text {
-  font-size: 2.4rem;
-  font-weight: 600;
-  margin-bottom: 1rem;
-  text-shadow: 0 0 6px #000, 0 0 12px #000;
-}
-
-#sub-text {
-  font-size: 1.1rem;
-  opacity: 0.9;
-  max-width: 70%;
-  text-shadow: 0 0 6px #000, 0 0 12px #000;
-}
-
-.fade-in {
-  animation: fadeIn 0.8s ease-out;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-/* Laadbalk */
-#loading-bar {
-  width: 60%;
-  height: 10px;
-  background: rgba(255,255,255,0.2);
-  border-radius: 5px;
-  overflow: hidden;
-  margin-top: 20px;
-  display: none;
-}
-
-#loading-fill {
-  height: 100%;
-  width: 0%;
-  background: #fff;
-}
-
-@keyframes loadingAnim {
-  from { width: 0%; }
-  to { width: 100%; }
-}
-
