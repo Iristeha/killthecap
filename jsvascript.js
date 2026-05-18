@@ -1,252 +1,101 @@
-// === DOM ELEMENTS ===
-const video = document.getElementById('mirror-video');
-const overlayText = document.getElementById('overlay-text');
-const subText = document.getElementById('sub-text');
+import { Client } from "pg";
+import formidable from "formidable";
+import fs from "fs";
 
-// === STATE ===
-let stream = null;
-let mediaRecorder = null;
-let recordedChunks = [];
-let recognition = null;
-let supportsSpeech = false;
-let flowActive = false;
-let state = 'idle';
+const RECIPIENT_EMAIL = "iris.ter.harmsel@outlook.nl";
+const RESEND_API_URL = "https://api.resend.com/emails";
 
-// === INITIALIZATION ===
-document.addEventListener('DOMContentLoaded', init);
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
 
-async function init() {
-  await startCamera();
-  setupSpeechRecognition();
-  setupKeyboardListener();
-  showReadyState();
-}
-
-// === CAMERA ===
-async function startCamera() {
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user' },
-      audio: true
-    });
-    video.srcObject = stream;
-    video.classList.add('blurred');
-  } catch (err) {
-    console.error('Camera/microfoon fout:', err);
-    overlayText.textContent = 'Camera of microfoon niet beschikbaar';
-    subText.textContent = 'Sta toegang toe in je browserinstellingen.';
-  }
-}
-
-// === SPEECH RECOGNITION ===
-function setupSpeechRecognition() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
-    supportsSpeech = false;
-    console.warn('Speech Recognition niet ondersteund');
-    return;
+export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
-  recognition = new SR();
-  recognition.lang = 'nl-NL';
-  recognition.continuous = false;
-  recognition.interimResults = false;
-  supportsSpeech = true;
-}
+  // --- BELANGRIJK: Formidable configureren voor Vercel ---
+  const form = formidable({
+    uploadDir: "/tmp",
+    keepExtensions: true,
+  });
 
-// === KEYBOARD LISTENER ===
-function setupKeyboardListener() {
-  document.addEventListener('keydown', (e) => {
-    if (e.code === 'Space' && !flowActive) {
-      e.preventDefault();
-      flowActive = true;
-      startExperience();
+  form.parse(req, async (err, fields, files) => {
+    if (err) {
+      console.error("Form parse error:", err);
+      return res.status(500).json({ error: "Form parse error" });
     }
+
+    const raw = files.video;
+    const videoFile = Array.isArray(raw) ? raw[0] : raw;
+
+    if (!videoFile || !videoFile.filepath) {
+      console.error("Invalid video file:", videoFile);
+      return res.status(400).json({ error: "Invalid video file" });
+    }
+
+    const videoBuffer = fs.readFileSync(videoFile.filepath);
+
+    // --- DATABASE OPSLAAN ---
+    const client = new Client({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+    });
+
+    try {
+      await client.connect();
+      await client.query("INSERT INTO videos (file) VALUES ($1)", [videoBuffer]);
+    } catch (error) {
+      console.error("Database insert error:", error);
+      return res.status(500).json({ error: "Database insert error" });
+    } finally {
+      await client.end().catch(() => {});
+    }
+
+    // --- MAIL VERSTUREN ---
+    try {
+      await sendResendEmail(videoBuffer);
+    } catch (emailError) {
+      console.error("Resend email error:", emailError);
+    }
+
+    return res.status(200).json({ success: true });
   });
 }
 
-// === READY STATE ===
-function showReadyState() {
-  state = 'ready';
-  overlayText.textContent = 'Druk SPATIEBALK om te beginnen';
-  subText.textContent = '';
-}
+async function sendResendEmail(videoBuffer) {
+  const apiKey = process.env.RESEND_API_KEY;
 
-// === FLOW START ===
-function startExperience() {
-  if (state !== 'ready') return;
-  showIntro();
-}
+  const attachmentBase64 = Buffer.from(videoBuffer).toString("base64");
 
-// === STEP 1: QUESTION ===
-function showIntro() {
-  state = 'intro';
-  overlayText.textContent = 'Waarom loog je?';
-  subText.textContent = 'Spreek je antwoord hardop uit.';
-  startListeningForLie();
-}
-
-function startListeningForLie() {
-  if (!supportsSpeech) {
-    setTimeout(() => handleAnswer(null), 1000);
-    return;
-  }
-
-  const fallback = setTimeout(() => handleAnswer(null), 10000);
-
-  recognition.onresult = (e) => {
-    clearTimeout(fallback);
-    const transcript = e.results[0][0].transcript;
-    handleAnswer(transcript);
+  const body = {
+    from: "onboarding@resend.dev",
+    to: RECIPIENT_EMAIL,
+    subject: "Nieuwe excuses-video binnen",
+    text: "Er is een nieuwe video geüpload.",
+    attachments: [
+      {
+        filename: "excuses.webm",
+        type: "video/webm",
+        content: attachmentBase64,
+      },
+    ],
   };
 
-  recognition.onerror = () => {
-    clearTimeout(fallback);
-    handleAnswer(null);
-  };
-
-  recognition.start();
-}
-
-function handleAnswer(transcript) {
-  if (state !== 'intro') return;
-  recognition.abort();
-  showMotives(transcript);
-}
-
-// === STEP 2: SHOW TRANSCRIPT ===
-function showMotives(transcript) {
-  state = 'motives';
-  overlayText.textContent = 'Dit waren je motieven:';
-  subText.textContent = transcript ? `"${transcript}"` : 'Je hebt niet gesproken.';
-  setTimeout(showApologyIntro, 6000);
-}
-
-// === STEP 3: APOLOGY INTRO ===
-function showApologyIntro() {
-  state = 'apology_intro';
-  overlayText.textContent = 'Tijd om je excuses aan te bieden.';
-  subText.textContent = 'De opname start zo.';
-  video.classList.remove('blurred');
-  setTimeout(startCountdown, 2000);
-}
-
-// === STEP 4: COUNTDOWN ===
-function startCountdown() {
-  state = 'countdown';
-  let count = 3;
-  overlayText.textContent = count;
-  subText.textContent = '';
-
-  const interval = setInterval(() => {
-    count--;
-    if (count > 0) {
-      overlayText.textContent = count;
-    } else {
-      clearInterval(interval);
-      overlayText.textContent = 'Opname gestart';
-      subText.textContent = '';
-      setTimeout(() => {
-        overlayText.textContent = '';
-        startRecording();
-      }, 500);
-    }
-  }, 1000);
-}
-
-// === STEP 5: RECORDING ===
-function startRecording() {
-  state = 'recording';
-  recordedChunks = [];
-
-  mediaRecorder = new MediaRecorder(stream, {
-    mimeType: 'video/webm;codecs=vp8,opus'
+  const response = await fetch(RESEND_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
   });
 
-  mediaRecorder.ondataavailable = (e) => {
-    if (e.data.size > 0) {
-      recordedChunks.push(e.data);
-    }
-  };
-
-  mediaRecorder.onstop = () => {
-    const blob = new Blob(recordedChunks, { type: 'video/webm' });
-    uploadVideo(blob);
-  };
-
-  mediaRecorder.start();
-  setTimeout(stopRecording, 10000);
-}
-
-function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    mediaRecorder.stop();
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Resend API error: ${response.status} ${errorText}`);
   }
-}
-
-// === STEP 6: UPLOAD VIDEO ===
-async function uploadVideo(blob) {
-  state = 'uploading';
-  showThinking();
-
-  const formData = new FormData();
-  formData.append('video', blob, 'excuses.webm');
-
-  try {
-    const response = await fetch('/api/upload', {
-      method: 'POST',
-      body: formData
-    });
-
-    const data = await response.json();
-
-    if (response.ok && data.success) {
-      showApproved();
-    } else {
-      console.error('Upload fout:', data);
-      showApproved();
-    }
-  } catch (err) {
-    console.error('Upload fout:', err);
-    showApproved();
-  }
-}
-
-// === STEP 7: LOADING BAR ===
-function showThinking() {
-  overlayText.textContent = 'Even nadenken...';
-  subText.textContent = '';
-
-  const bar = document.getElementById('loading-bar');
-  const fill = document.getElementById('loading-fill');
-
-  bar.style.display = 'block';
-  fill.style.animation = 'none';
-  void fill.offsetWidth;
-  fill.style.animation = 'loadingAnim 3s linear forwards';
-
-  setTimeout(() => {
-    bar.style.display = 'none';
-  }, 3000);
-}
-
-// === STEP 8: APPROVED ===
-function showApproved() {
-  state = 'approved';
-  overlayText.textContent = 'Je excuses zijn goedgekeurd.';
-  subText.textContent = '';
-  setTimeout(showReturnScreen, 5000);
-}
-
-// === STEP 9: RETURN ===
-function showReturnScreen() {
-  state = 'return';
-  overlayText.textContent = 'Je wordt teruggestuurd.';
-  subText.textContent = '';
-  flowActive = false;
-  setTimeout(() => {
-    flowActive = false;
-    showReadyState();
-  }, 3000);
 }
 
