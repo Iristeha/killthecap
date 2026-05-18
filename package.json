@@ -1,0 +1,13 @@
+{
+  "name": "probeersel",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev",
+    "start": "vercel dev"
+  },
+  "dependencies": {
+    "formidable": "^3.0.0",
+    "pg": "^8.0.0"
+  }
+}
