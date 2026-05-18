@@ -7,7 +7,7 @@ const RESEND_API_URL = "https://api.resend.com/emails";
 
 export const config = {
   api: {
-    bodyParser: false, // belangrijk voor video uploads
+    bodyParser: false, // nodig voor video uploads
   },
 };
 
@@ -24,13 +24,18 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Form parse error" });
     }
 
-    const videoFile = files.video;
-    if (!videoFile) {
-      return res.status(400).json({ error: "No video file" });
+    // --- FIX 1: Formidable geeft soms een array terug ---
+    const videoFileRaw = files.video;
+    const videoFile = Array.isArray(videoFileRaw) ? videoFileRaw[0] : videoFileRaw;
+
+    if (!videoFile || !videoFile.filepath) {
+      console.error("No valid video file received:", videoFileRaw);
+      return res.status(400).json({ error: "Invalid video file" });
     }
 
     const videoBuffer = fs.readFileSync(videoFile.filepath);
 
+    // --- DATABASE OPSLAAN ---
     const client = new Client({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
@@ -38,10 +43,7 @@ export default async function handler(req, res) {
 
     try {
       await client.connect();
-      await client.query(
-        "INSERT INTO videos (file) VALUES ($1)",
-        [videoBuffer]
-      );
+      await client.query("INSERT INTO videos (file) VALUES ($1)", [videoBuffer]);
     } catch (error) {
       console.error("Database insert error:", error);
       return res.status(500).json({ error: "Database insert error" });
@@ -53,10 +55,12 @@ export default async function handler(req, res) {
       }
     }
 
+    // --- MAIL VERSTUREN ---
     try {
       await sendResendEmail(videoBuffer);
     } catch (emailError) {
       console.error("Resend email error:", emailError);
+      // we sturen GEEN error terug, want upload is wel gelukt
     }
 
     return res.status(200).json({ success: true });
@@ -72,7 +76,8 @@ async function sendResendEmail(videoBuffer) {
   const attachmentBase64 = Buffer.from(videoBuffer).toString("base64");
 
   const body = {
-    from: "Excuses <no-reply@resend.dev>",
+    // --- FIX 2: geldig Resend testadres ---
+    from: "onboarding@resend.dev",
     to: RECIPIENT_EMAIL,
     subject: "Nieuwe excuses-video binnen",
     text: "Er is een nieuwe video geüpload.",
@@ -99,4 +104,3 @@ async function sendResendEmail(videoBuffer) {
     throw new Error(`Resend API error: ${response.status} ${errorText}`);
   }
 }
-
