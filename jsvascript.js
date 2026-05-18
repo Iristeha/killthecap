@@ -1,53 +1,252 @@
-const video = document.getElementById("mirror-video");
-const startBtn = document.getElementById("start");
-const stopBtn = document.getElementById("stop");
+// === DOM ELEMENTS ===
+const video = document.getElementById('mirror-video');
+const overlayText = document.getElementById('overlay-text');
+const subText = document.getElementById('sub-text');
 
-let mediaRecorder;
-let chunks = [];
+// === STATE ===
+let stream = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+let recognition = null;
+let supportsSpeech = false;
+let flowActive = false;
+let state = 'idle';
 
-// Camera starten
-async function initCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: true,
-    audio: true,
+// === INITIALIZATION ===
+document.addEventListener('DOMContentLoaded', init);
+
+async function init() {
+  await startCamera();
+  setupSpeechRecognition();
+  setupKeyboardListener();
+  showReadyState();
+}
+
+// === CAMERA ===
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user' },
+      audio: true
+    });
+    video.srcObject = stream;
+    video.classList.add('blurred');
+  } catch (err) {
+    console.error('Camera/microfoon fout:', err);
+    overlayText.textContent = 'Camera of microfoon niet beschikbaar';
+    subText.textContent = 'Sta toegang toe in je browserinstellingen.';
+  }
+}
+
+// === SPEECH RECOGNITION ===
+function setupSpeechRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    supportsSpeech = false;
+    console.warn('Speech Recognition niet ondersteund');
+    return;
+  }
+
+  recognition = new SR();
+  recognition.lang = 'nl-NL';
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  supportsSpeech = true;
+}
+
+// === KEYBOARD LISTENER ===
+function setupKeyboardListener() {
+  document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' && !flowActive) {
+      e.preventDefault();
+      flowActive = true;
+      startExperience();
+    }
   });
+}
 
-  video.srcObject = stream;
+// === READY STATE ===
+function showReadyState() {
+  state = 'ready';
+  overlayText.textContent = 'Druk SPATIEBALK om te beginnen';
+  subText.textContent = '';
+}
 
-  mediaRecorder = new MediaRecorder(stream);
+// === FLOW START ===
+function startExperience() {
+  if (state !== 'ready') return;
+  showIntro();
+}
+
+// === STEP 1: QUESTION ===
+function showIntro() {
+  state = 'intro';
+  overlayText.textContent = 'Waarom loog je?';
+  subText.textContent = 'Spreek je antwoord hardop uit.';
+  startListeningForLie();
+}
+
+function startListeningForLie() {
+  if (!supportsSpeech) {
+    setTimeout(() => handleAnswer(null), 1000);
+    return;
+  }
+
+  const fallback = setTimeout(() => handleAnswer(null), 10000);
+
+  recognition.onresult = (e) => {
+    clearTimeout(fallback);
+    const transcript = e.results[0][0].transcript;
+    handleAnswer(transcript);
+  };
+
+  recognition.onerror = () => {
+    clearTimeout(fallback);
+    handleAnswer(null);
+  };
+
+  recognition.start();
+}
+
+function handleAnswer(transcript) {
+  if (state !== 'intro') return;
+  recognition.abort();
+  showMotives(transcript);
+}
+
+// === STEP 2: SHOW TRANSCRIPT ===
+function showMotives(transcript) {
+  state = 'motives';
+  overlayText.textContent = 'Dit waren je motieven:';
+  subText.textContent = transcript ? `"${transcript}"` : 'Je hebt niet gesproken.';
+  setTimeout(showApologyIntro, 6000);
+}
+
+// === STEP 3: APOLOGY INTRO ===
+function showApologyIntro() {
+  state = 'apology_intro';
+  overlayText.textContent = 'Tijd om je excuses aan te bieden.';
+  subText.textContent = 'De opname start zo.';
+  video.classList.remove('blurred');
+  setTimeout(startCountdown, 2000);
+}
+
+// === STEP 4: COUNTDOWN ===
+function startCountdown() {
+  state = 'countdown';
+  let count = 3;
+  overlayText.textContent = count;
+  subText.textContent = '';
+
+  const interval = setInterval(() => {
+    count--;
+    if (count > 0) {
+      overlayText.textContent = count;
+    } else {
+      clearInterval(interval);
+      overlayText.textContent = 'Opname gestart';
+      subText.textContent = '';
+      setTimeout(() => {
+        overlayText.textContent = '';
+        startRecording();
+      }, 500);
+    }
+  }, 1000);
+}
+
+// === STEP 5: RECORDING ===
+function startRecording() {
+  state = 'recording';
+  recordedChunks = [];
+
+  mediaRecorder = new MediaRecorder(stream, {
+    mimeType: 'video/webm;codecs=vp8,opus'
+  });
 
   mediaRecorder.ondataavailable = (e) => {
-    chunks.push(e.data);
+    if (e.data.size > 0) {
+      recordedChunks.push(e.data);
+    }
   };
 
-  mediaRecorder.onstop = async () => {
-    const blob = new Blob(chunks, { type: "video/webm" });
-    chunks = [];
-
-    await sendVideoToRailway(blob);
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+    uploadVideo(blob);
   };
-}
 
-async function sendVideoToRailway(blob) {
-  const formData = new FormData();
-  formData.append("video", blob, "opname.webm");
-
-  await fetch("/api/upload", {
-    method: "POST",
-    body: formData,
-  });
-}
-
-startBtn.addEventListener("click", () => {
   mediaRecorder.start();
-  startBtn.disabled = true;
-  stopBtn.disabled = false;
-});
+  setTimeout(stopRecording, 10000);
+}
 
-stopBtn.addEventListener("click", () => {
-  mediaRecorder.stop();
-  startBtn.disabled = false;
-  stopBtn.disabled = true;
-});
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+  }
+}
 
-initCamera();
+// === STEP 6: UPLOAD VIDEO ===
+async function uploadVideo(blob) {
+  state = 'uploading';
+  showThinking();
+
+  const formData = new FormData();
+  formData.append('video', blob, 'excuses.webm');
+
+  try {
+    const response = await fetch('/api/upload', {
+      method: 'POST',
+      body: formData
+    });
+
+    const data = await response.json();
+
+    if (response.ok && data.success) {
+      showApproved();
+    } else {
+      console.error('Upload fout:', data);
+      showApproved();
+    }
+  } catch (err) {
+    console.error('Upload fout:', err);
+    showApproved();
+  }
+}
+
+// === STEP 7: LOADING BAR ===
+function showThinking() {
+  overlayText.textContent = 'Even nadenken...';
+  subText.textContent = '';
+
+  const bar = document.getElementById('loading-bar');
+  const fill = document.getElementById('loading-fill');
+
+  bar.style.display = 'block';
+  fill.style.animation = 'none';
+  void fill.offsetWidth;
+  fill.style.animation = 'loadingAnim 3s linear forwards';
+
+  setTimeout(() => {
+    bar.style.display = 'none';
+  }, 3000);
+}
+
+// === STEP 8: APPROVED ===
+function showApproved() {
+  state = 'approved';
+  overlayText.textContent = 'Je excuses zijn goedgekeurd.';
+  subText.textContent = '';
+  setTimeout(showReturnScreen, 5000);
+}
+
+// === STEP 9: RETURN ===
+function showReturnScreen() {
+  state = 'return';
+  overlayText.textContent = 'Je wordt teruggestuurd.';
+  subText.textContent = '';
+  flowActive = false;
+  setTimeout(() => {
+    flowActive = false;
+    showReadyState();
+  }, 3000);
+}
+
