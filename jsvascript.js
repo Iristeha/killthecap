@@ -32,9 +32,10 @@ async function initCamera() {
 
 // --- FASE 1: SPRAAKHERKENNING ---
 function startSpeechRecognition() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const recognition = new SpeechRecognition();
+  const SpeechRecognition =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
 
+  const recognition = new SpeechRecognition();
   recognition.lang = "nl-NL";
   recognition.continuous = true;
   recognition.interimResults = true;
@@ -42,23 +43,32 @@ function startSpeechRecognition() {
   let finalTranscript = "";
 
   recognition.onresult = (event) => {
-    let text = "";
+    let liveText = "";
+
     for (let i = event.resultIndex; i < event.results.length; i++) {
-      text += event.results[i][0].transcript;
+      const result = event.results[i][0].transcript;
+
+      // Live tekst tonen
+      liveText += result;
+
+      // Definitieve tekst opslaan
       if (event.results[i].isFinal) {
-        finalTranscript += event.results[i][0].transcript + " ";
+        finalTranscript += result + " ";
       }
     }
-    transcriptBox.innerText = text;
+
+    // Update transcript in UI
+    transcriptBox.innerText = liveText;
   };
 
   recognition.onend = () => {
-    // Wanneer gebruiker stopt met praten → motieven bepalen
-    determineMotives(finalTranscript);
+    // Gebruiker is klaar met praten → motieven bepalen
+    determineMotives(finalTranscript.trim());
   };
 
   recognition.start();
 }
+
 
 // MOTIEVEN BEPALEN
 function determineMotives(text) {
