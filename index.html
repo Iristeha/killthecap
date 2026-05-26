@@ -1,31 +1,84 @@
 <!DOCTYPE html>
 <html lang="nl">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Spiegel van de Leugen</title>
 
   <!-- Poppins font -->
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet" />
 
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-
+  <!-- CAMERA ACHTERGROND -->
   <video id="mirror-video" autoplay playsinline></video>
 
+  <!-- HOOFD OVERLAY-CONTAINER -->
   <div id="overlay">
-    <div id="overlay-text"></div>
-    <div id="sub-text"></div>
 
-    <!-- Laadbalk -->
-    <div id="loading-bar">
-      <div id="loading-fill"></div>
-    </div>
+    <!-- FASE 1: WAAROM LOOG JE + SPRAAKHERKENNING -->
+    <section id="phase-question" class="phase active">
+      <div id="overlay-text">Waarom loog je?</div>
+      <div id="sub-text">Kijk jezelf aan en vertel hardop waarom je loog.</div>
+
+      <div id="speech-transcript-label">Je woorden:</div>
+      <div id="speech-transcript"></div>
+
+      <div id="hint-text">De spiegel luistert mee…</div>
+    </section>
+
+    <!-- FASE 2: MOTIEVEN TONEN -->
+    <section id="phase-motives" class="phase">
+      <div id="overlay-text">Je loog uit...</div>
+      <div id="motives-list">
+        <!-- JS vult hier motieven in, bv. angst, schaamte, status -->
+      </div>
+      <div id="sub-text">Herken je jezelf hierin?</div>
+    </section>
+
+    <!-- FASE 3: AANKONDIGING EXCUSES + COUNTDOWN -->
+    <section id="phase-countdown" class="phase">
+      <div id="overlay-text">Tijd voor je excuses.</div>
+      <div id="sub-text">Je excuses worden nu opgenomen. Bereid je voor.</div>
+      <div id="countdown">3</div>
+    </section>
+
+    <!-- FASE 4: EXCUSES-OPNAME BEZIG -->
+    <section id="phase-recording" class="phase">
+      <div id="overlay-text">Spreek je excuses uit.</div>
+      <div id="sub-text">De opname stopt wanneer je klaar bent met praten.</div>
+      <div id="recording-indicator">● Opname bezig</div>
+    </section>
+
+    <!-- FASE 5: LADEN / NADENKEN -->
+    <section id="phase-thinking" class="phase">
+      <div id="overlay-text">Even nadenken…</div>
+      <div id="sub-text">Je excuses worden beoordeeld.</div>
+
+      <div id="loading-bar">
+        <div id="loading-fill"></div>
+      </div>
+    </section>
+
+    <!-- FASE 6: GOEDGEKEURD / TERUGSTUREN -->
+    <section id="phase-approved" class="phase">
+      <div id="overlay-text">Je excuses zijn goedgekeurd.</div>
+      <div id="sub-text">Je wordt teruggestuurd.</div>
+    </section>
+
+    <!-- STATUSBALK ONDERIN (ALGEMEEN) -->
+    <div id="uploadStatus">De spiegel wacht op je woorden.</div>
+  </div>
+
+  <!-- KNOPPEN (OPTIONEEL, KUNNEN OOK VERBORGEN WORDEN) -->
+  <div id="button-row">
+    <button id="debugStartBtn" type="button">DEBUG: Start flow</button>
   </div>
 
   <script src="jsvascript.js"></script>
 </body>
 </html>
+
 
 
 
