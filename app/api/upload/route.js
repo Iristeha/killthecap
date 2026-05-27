@@ -65,3 +65,13 @@ export async function POST(req) {
     return NextResponse.json({ error: "Upload failed" }, { status: 500 });
   }
 }
+
+export async function GET() {
+  return NextResponse.json(
+    { error: "Use POST with multipart/form-data to upload a video." },
+    {
+      status: 405,
+      headers: { Allow: "POST" }
+    }
+  );
+}
