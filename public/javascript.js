@@ -37,16 +37,26 @@ document.getElementById("uploadButton").addEventListener("click", async () => {
   const blob = new Blob(recordedChunks, { type: "video/webm" });
   const formData = new FormData();
   formData.append("video", blob, "excuses.webm");
+  try {
+    uploadButton.disabled = true;
+    const res = await fetch("/api/upload", {
+      method: "POST",
+      body: formData
+    });
 
-  const res = await fetch("/api/upload", {
-    method: "POST",
-    body: formData
-  });
+    const json = await res.json().catch(() => ({}));
 
-  if (res.ok) {
-    uploadSection.classList.add("hidden");
-    successMessage.classList.remove("hidden");
-  } else {
-    alert("Upload mislukt");
+    if (res.ok) {
+      uploadSection.classList.add("hidden");
+      successMessage.classList.remove("hidden");
+    } else {
+      const msg = json?.error || `Upload failed (${res.status})`;
+      alert(msg);
+    }
+  } catch (err) {
+    console.error('Upload error:', err);
+    alert('Upload mislukt, controleer de console voor details.');
+  } finally {
+    uploadButton.disabled = false;
   }
 });
