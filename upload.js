@@ -1,6 +1,8 @@
 import { Client } from "pg";
 import formidable from "formidable";
 import fs from "fs";
+import os from "os";
+import path from "path";
 
 const RECIPIENT_EMAIL = "iris.ter.harmsel@outlook.com";
 const RESEND_API_URL = "https://api.resend.com/emails";
@@ -21,7 +23,15 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "DATABASE_URL is not configured" });
   }
 
-  const form = formidable({ multiples: false });
+  const form = formidable({
+    multiples: false,
+    keepExtensions: true,
+    uploadDir: os.tmpdir(),
+    fileWriteStreamHandler: (file) => {
+      const dest = path.join(os.tmpdir(), file.originalFilename || `upload-${Date.now()}.webm`);
+      return fs.createWriteStream(dest);
+    },
+  });
 
   form.parse(req, async (err, fields, files) => {
     if (err) {
@@ -30,13 +40,17 @@ export default async function handler(req, res) {
     }
 
     const videoFile = Array.isArray(files.video) ? files.video[0] : files.video;
-    if (!videoFile) {
+    if (!videoFile || typeof videoFile !== 'object') {
+      console.error("Invalid upload shape", files.video);
       return res.status(400).json({ error: "No video file" });
     }
 
-    const videoPath = videoFile.filepath || videoFile.path;
+    const videoPath = videoFile.filepath || videoFile.path || videoFile.filePath || videoFile._writeStream?.path || videoFile.file;
     if (!videoPath) {
-      return res.status(500).json({ error: "Unable to read uploaded file path" });
+      console.error("Unable to read uploaded file path", {
+        videoFile,
+      });
+      return res.status(500).json({ error: "Unable to read uploaded file path", details: Object.keys(videoFile) });
     }
 
     let client;
