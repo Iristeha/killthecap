@@ -3,13 +3,11 @@ import formidable from "formidable";
 import fs from "fs";
 import os from "os";
 import path from "path";
-
-const RECIPIENT_EMAIL = "iris.ter.harmsel@outlook.com";
-const RESEND_API_URL = "https://api.resend.com/emails";
+import fetch from "node-fetch";
 
 export const config = {
   api: {
-    bodyParser: false, // belangrijk voor video uploads
+    bodyParser: false,
   },
 };
 
@@ -18,19 +16,10 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  if (!process.env.DATABASE_URL) {
-    console.error("DATABASE_URL is not configured");
-    return res.status(500).json({ error: "DATABASE_URL is not configured" });
-  }
-
   const form = formidable({
     multiples: false,
-    keepExtensions: true,
     uploadDir: os.tmpdir(),
-    fileWriteStreamHandler: (file) => {
-      const dest = path.join(os.tmpdir(), file.originalFilename || `upload-${Date.now()}.webm`);
-      return fs.createWriteStream(dest);
-    },
+    keepExtensions: true,
   });
 
   form.parse(req, async (err, fields, files) => {
@@ -39,77 +28,48 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Form parse error" });
     }
 
-    const videoFile = Array.isArray(files.video) ? files.video[0] : files.video;
-    if (!videoFile || typeof videoFile !== 'object') {
-      console.error("Invalid upload shape", files.video);
+    const videoFile = files.video;
+    if (!videoFile) {
       return res.status(400).json({ error: "No video file" });
     }
 
-    const videoPath = videoFile.filepath || videoFile.path || videoFile.filePath || videoFile._writeStream?.path || videoFile.file;
+    const videoPath = videoFile.filepath || videoFile.path;
     if (!videoPath) {
-      console.error("Unable to read uploaded file path", {
-        videoFile,
-      });
-      return res.status(500).json({ error: "Unable to read uploaded file path", details: Object.keys(videoFile) });
+      return res.status(500).json({ error: "No file path returned by formidable" });
     }
 
-    let client;
-
     try {
-      // Lees de video in als buffer
       const videoBuffer = fs.readFileSync(videoPath);
 
-      // Railway connectie
-      client = new Client({
+      const client = new Client({
         connectionString: process.env.DATABASE_URL,
         ssl: { rejectUnauthorized: false },
       });
 
       await client.connect();
-
-      // INSERT in jouw tabel "videos"
-      await client.query(
-        "INSERT INTO videos (file) VALUES ($1)",
-        [videoBuffer]
-      );
-
+      await client.query("INSERT INTO videos (file) VALUES ($1)", [videoBuffer]);
       await client.end();
 
-      // Stuur email met video
-      await sendEmailWithVideo(videoBuffer);
+      await sendEmail(videoBuffer);
 
-      return res.status(200).json({ success: true, message: "Video uploaded and email sent" });
+      return res.status(200).json({ success: true });
     } catch (error) {
       console.error("Processing error:", error);
-      if (client) {
-        try {
-          await client.end();
-        } catch (closeError) {
-          console.error("Database close error:", closeError);
-        }
-      }
-      return res.status(500).json({ error: error.message || "Processing failed" });
+      return res.status(500).json({ error: error.message });
     }
   });
 }
 
-async function sendEmailWithVideo(videoBuffer) {
+async function sendEmail(videoBuffer) {
   const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
-    throw new Error("RESEND_API_KEY is not configured");
-  }
 
   const attachmentBase64 = Buffer.from(videoBuffer).toString("base64");
 
   const body = {
-    from: "Spiegel van de Leugen <no-reply@resend.dev>",
-    to: RECIPIENT_EMAIL,
-    subject: "Nieuwe excuses-video geüpload",
-    html: `
-      <h2>Nieuwe excuses-video</h2>
-      <p>Er is een nieuwe video met excuses geüpload naar je systeem.</p>
-      <p>De video is bijgesloten.</p>
-    `,
+    from: "Spiegel <no-reply@resend.dev>",
+    to: "iris.ter.harmsel@outlook.com",
+    subject: "Nieuwe excuses-video",
+    text: "Er is een nieuwe video geüpload.",
     attachments: [
       {
         filename: "excuses.webm",
@@ -118,7 +78,7 @@ async function sendEmailWithVideo(videoBuffer) {
     ],
   };
 
-  const response = await fetch(RESEND_API_URL, {
+  const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -128,11 +88,7 @@ async function sendEmailWithVideo(videoBuffer) {
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Resend API error: ${response.status} ${errorText}`);
+    throw new Error(await response.text());
   }
-
-  const result = await response.json();
-  console.log("Email sent successfully:", result);
 }
 
