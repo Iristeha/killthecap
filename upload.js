@@ -2,7 +2,7 @@ import { Client } from "pg";
 import formidable from "formidable";
 import fs from "fs";
 
-const RECIPIENT_EMAIL = "iris.ter.harmsel@outlook.nl";
+const RECIPIENT_EMAIL = "iris.ter.harmsel@outlook.com";
 const RESEND_API_URL = "https://api.resend.com/emails";
 
 export const config = {
@@ -16,7 +16,12 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const form = formidable();
+  if (!process.env.DATABASE_URL) {
+    console.error("DATABASE_URL is not configured");
+    return res.status(500).json({ error: "DATABASE_URL is not configured" });
+  }
+
+  const form = formidable({ multiples: false });
 
   form.parse(req, async (err, fields, files) => {
     if (err) {
@@ -24,46 +29,57 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Form parse error" });
     }
 
-    const videoFile = files.video;
+    const videoFile = Array.isArray(files.video) ? files.video[0] : files.video;
     if (!videoFile) {
       return res.status(400).json({ error: "No video file" });
     }
 
-    const videoBuffer = fs.readFileSync(videoFile.filepath);
+    const videoPath = videoFile.filepath || videoFile.path;
+    if (!videoPath) {
+      return res.status(500).json({ error: "Unable to read uploaded file path" });
+    }
 
-    const client = new Client({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-    });
+    let client;
 
     try {
+      // Lees de video in als buffer
+      const videoBuffer = fs.readFileSync(videoPath);
+
+      // Railway connectie
+      client = new Client({
+        connectionString: process.env.DATABASE_URL,
+        ssl: { rejectUnauthorized: false },
+      });
+
       await client.connect();
+
+      // INSERT in jouw tabel "videos"
       await client.query(
         "INSERT INTO videos (file) VALUES ($1)",
         [videoBuffer]
       );
+
+      await client.end();
+
+      // Stuur email met video
+      await sendEmailWithVideo(videoBuffer);
+
+      return res.status(200).json({ success: true, message: "Video uploaded and email sent" });
     } catch (error) {
-      console.error("Database insert error:", error);
-      return res.status(500).json({ error: "Database insert error" });
-    } finally {
-      try {
-        await client.end();
-      } catch (closeError) {
-        console.error("Database close error:", closeError);
+      console.error("Processing error:", error);
+      if (client) {
+        try {
+          await client.end();
+        } catch (closeError) {
+          console.error("Database close error:", closeError);
+        }
       }
+      return res.status(500).json({ error: error.message || "Processing failed" });
     }
-
-    try {
-      await sendResendEmail(videoBuffer);
-    } catch (emailError) {
-      console.error("Resend email error:", emailError);
-    }
-
-    return res.status(200).json({ success: true });
   });
 }
 
-async function sendResendEmail(videoBuffer) {
+async function sendEmailWithVideo(videoBuffer) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     throw new Error("RESEND_API_KEY is not configured");
@@ -72,14 +88,17 @@ async function sendResendEmail(videoBuffer) {
   const attachmentBase64 = Buffer.from(videoBuffer).toString("base64");
 
   const body = {
-    from: "Excuses <no-reply@resend.dev>",
+    from: "Spiegel van de Leugen <no-reply@resend.dev>",
     to: RECIPIENT_EMAIL,
-    subject: "Nieuwe excuses-video binnen",
-    text: "Er is een nieuwe video geüpload.",
+    subject: "Nieuwe excuses-video geüpload",
+    html: `
+      <h2>Nieuwe excuses-video</h2>
+      <p>Er is een nieuwe video met excuses geüpload naar je systeem.</p>
+      <p>De video is bijgesloten.</p>
+    `,
     attachments: [
       {
         filename: "excuses.webm",
-        type: "video/webm",
         content: attachmentBase64,
       },
     ],
@@ -98,5 +117,8 @@ async function sendResendEmail(videoBuffer) {
     const errorText = await response.text();
     throw new Error(`Resend API error: ${response.status} ${errorText}`);
   }
+
+  const result = await response.json();
+  console.log("Email sent successfully:", result);
 }
 

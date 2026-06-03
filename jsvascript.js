@@ -198,14 +198,25 @@ async function uploadVideo(blob) {
       body: formData,
     });
 
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch (jsonError) {
+      const text = await response.text();
+      console.error('Upload fout: response parse error', jsonError, text);
+      hideLoadingBar();
+      showUploadError();
+      return;
+    }
+
     hideLoadingBar();
+    console.log('Upload response', response.status, data);
 
     if (response.ok && data.success) {
       showUploadComplete();
     } else {
       console.error('Upload fout:', data);
-      showUploadError();
+      showUploadError(data.error || 'Serverfout');
     }
   } catch (err) {
     console.error('Upload fout:', err);
@@ -222,10 +233,10 @@ function showUploadComplete() {
   setTimeout(showReadyState, 5000);
 }
 
-function showUploadError() {
+function showUploadError(message = 'Probeer het later nog eens.') {
   state = 'error';
   overlayText.textContent = 'Upload mislukt.';
-  subText.textContent = 'Probeer het later nog eens.';
+  subText.textContent = message;
   flowActive = false;
   setTimeout(showReadyState, 5000);
 }
