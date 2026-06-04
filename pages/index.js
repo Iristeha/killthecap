@@ -1,7 +1,11 @@
 import Head from "next/head";
 import Script from "next/script";
+import Link from "next/link";
+import { useState } from "react";
 
 export default function Home() {
+  const [started, setStarted] = useState(false);
+
   return (
     <>
       <Head>
@@ -17,18 +21,35 @@ export default function Home() {
         />
       </Head>
 
-      <video id="mirror-video" autoPlay playsInline></video>
+      {!started ? (
+        <main className="start-screen">
+          <h1>Spiegel van de Leugen</h1>
+          <p>Welkom — kies een optie om te beginnen.</p>
+          <div className="start-actions">
+            <Link href="/test">
+              <a className="btn">Open Testscherm</a>
+            </Link>
+            <button className="btn primary" onClick={() => setStarted(true)}>
+              Start App
+            </button>
+          </div>
+        </main>
+      ) : (
+        <>
+          <video id="mirror-video" autoPlay playsInline></video>
 
-      <div id="overlay">
-        <div id="overlay-text"></div>
-        <div id="sub-text"></div>
+          <div id="overlay">
+            <div id="overlay-text"></div>
+            <div id="sub-text"></div>
 
-        <div id="loading-bar">
-          <div id="loading-fill"></div>
-        </div>
-      </div>
+            <div id="loading-bar">
+              <div id="loading-fill"></div>
+            </div>
+          </div>
 
-      <Script src="/jsvascript.js" strategy="afterInteractive" />
+          <Script src="/jsvascript.js" strategy="afterInteractive" />
+        </>
+      )}
     </>
   );
 }

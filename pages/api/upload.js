@@ -29,6 +29,12 @@ export default async function handler(req, res) {
     uploadDir: os.tmpdir(),
     fileWriteStreamHandler: (file) => {
       const dest = path.join(os.tmpdir(), file.originalFilename || `upload-${Date.now()}.webm`);
+      // Ensure the file object has the final path so later code reads the correct file
+      try {
+        file.filepath = dest;
+      } catch (e) {
+        // ignore if property cannot be set
+      }
       return fs.createWriteStream(dest);
     },
   });
