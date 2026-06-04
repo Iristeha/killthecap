@@ -3,9 +3,9 @@ import formidable from "formidable";
 import fs from "fs";
 import os from "os";
 import path from "path";
+import { Resend } from "resend";
 
 const RECIPIENT_EMAIL = "iris.ter.harmsel@outlook.com";
-const RESEND_API_URL = "https://api.resend.com/emails";
 
 export const config = {
   api: {
@@ -115,9 +115,10 @@ async function sendEmailWithVideo(videoBuffer) {
     throw new Error("RESEND_API_KEY is not configured");
   }
 
-  const attachmentBase64 = Buffer.from(videoBuffer).toString("base64");
+  const resend = new Resend(apiKey);
+  const attachmentBase64 = videoBuffer.toString("base64");
 
-  const body = {
+  const response = await resend.emails.send({
     from: "Spiegel van de Leugen <no-reply@resend.dev>",
     to: RECIPIENT_EMAIL,
     subject: "Nieuwe excuses-video geüpload",
@@ -126,33 +127,20 @@ async function sendEmailWithVideo(videoBuffer) {
       <p>Er is een nieuwe video met excuses geüpload naar je systeem.</p>
       <p>De video is bijgesloten.</p>
     `,
-attachments: [
-  {
-    filename: "excuses.webm",
-    content: attachmentBase64,
-    type: "video/webm",
-    disposition: "attachment"
-  }
-]
-
-
-  };
-
-  const response = await fetch(RESEND_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
+    attachments: [
+      {
+        filename: "excuses.webm",
+        content: attachmentBase64,
+        type: "video/webm",
+        disposition: "attachment",
+      },
+    ],
   });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Resend API error: ${response.status} ${errorText}`);
+  if (response.error) {
+    throw new Error(`Resend API error: ${response.error.message}`);
   }
 
-  const result = await response.json();
-  console.log("Email sent successfully:", result);
+  console.log("Email sent successfully:", response.data);
 }
 
