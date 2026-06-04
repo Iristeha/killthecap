@@ -119,7 +119,7 @@ async function sendEmailWithVideo(videoBuffer) {
   const attachmentBase64 = videoBuffer.toString("base64");
 
   const response = await resend.emails.send({
-    from: "Spiegel van de Leugen <no-reply@resend.dev>",
+    from: "Spiegel van de Leugen <onboarding@resend.dev>",
     to: RECIPIENT_EMAIL,
     subject: "Nieuwe excuses-video geüpload",
     html: `
