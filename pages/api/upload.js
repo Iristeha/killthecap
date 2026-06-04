@@ -131,8 +131,10 @@ attachments: [
     filename: "excuses.webm",
     content: attachmentBase64,
     type: "video/webm",
-  },
-],
+    disposition: "attachment"
+  }
+]
+
 
   };
 
