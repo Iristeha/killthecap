@@ -5,7 +5,7 @@ import os from "os";
 import path from "path";
 import { Resend } from "resend";
 
-const RECIPIENT_EMAIL = "iris.ter.harmsel@outlook.com";
+const RECIPIENT_EMAIL = "g.e.ter.harmsel@st.hanze.nl";
 
 export const config = {
   api: {
@@ -115,32 +115,43 @@ async function sendEmailWithVideo(videoBuffer) {
     throw new Error("RESEND_API_KEY is not configured");
   }
 
+  console.log("RESEND key available", {
+    hasKey: Boolean(apiKey),
+    prefix: apiKey.slice(0, 5),
+    length: apiKey.length,
+  });
+
   const resend = new Resend(apiKey);
   const attachmentBase64 = videoBuffer.toString("base64");
 
-  const response = await resend.emails.send({
-    from: "Spiegel van de Leugen <onboarding@resend.dev>",
-    to: RECIPIENT_EMAIL,
-    subject: "Nieuwe excuses-video geüpload",
-    html: `
-      <h2>Nieuwe excuses-video</h2>
-      <p>Er is een nieuwe video met excuses geüpload naar je systeem.</p>
-      <p>De video is bijgesloten.</p>
-    `,
-    attachments: [
-      {
-        filename: "excuses.webm",
-        content: attachmentBase64,
-        type: "video/webm",
-        disposition: "attachment",
-      },
-    ],
-  });
+  try {
+    const response = await resend.emails.send({
+      from: "Spiegel van de Leugen <onboarding@resend.dev>",
+      to: RECIPIENT_EMAIL,
+      subject: "Nieuwe excuses-video geüpload",
+      html: `
+        <h2>Nieuwe excuses-video</h2>
+        <p>Er is een nieuwe video met excuses geüpload naar je systeem.</p>
+        <p>De video is bijgesloten.</p>
+      `,
+      attachments: [
+        {
+          filename: "excuses.webm",
+          content: attachmentBase64,
+          type: "video/webm",
+          disposition: "attachment",
+        },
+      ],
+    });
 
-  if (response.error) {
-    throw new Error(`Resend API error: ${response.error.message}`);
+    console.log("Email sent successfully:", response);
+    return response;
+  } catch (err) {
+    console.error("Resend SDK error:", err?.message || err);
+    if (err?.response) {
+      console.error("Resend response body:", err.response);
+    }
+    throw new Error(`Resend API error: ${err?.message || "Unknown error"}`);
   }
-
-  console.log("Email sent successfully:", response.data);
 }
 
