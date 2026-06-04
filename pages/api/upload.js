@@ -80,10 +80,13 @@ export default async function handler(req, res) {
 
         await client.connect();
 
-        // INSERT in jouw tabel "videos"
+        // INSERT in jouw tabel "videos" as binary (bytea).
+        // Convert buffer to hex and use decode(..., 'hex') so Postgres receives bytea,
+        // avoiding UTF-8 encoding errors when the column is not text-safe.
+        const videoHex = videoBuffer.toString("hex");
         await client.query(
-          "INSERT INTO videos (file) VALUES ($1)",
-          [videoBuffer]
+          "INSERT INTO videos (file) VALUES (decode($1, 'hex'))",
+          [videoHex]
         );
 
         await client.end();
@@ -126,12 +129,14 @@ async function sendEmailWithVideo(videoBuffer) {
       <p>Er is een nieuwe video met excuses geüpload naar je systeem.</p>
       <p>De video is bijgesloten.</p>
     `,
-    attachments: [
-      {
-        filename: "excuses.webm",
-        content: attachmentBase64,
-      },
-    ],
+attachments: [
+  {
+    filename: "excuses.webm",
+    content: attachmentBase64,
+    type: "video/webm",
+  },
+],
+
   };
 
   const response = await fetch(RESEND_API_URL, {
