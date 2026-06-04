@@ -80,13 +80,10 @@ export default async function handler(req, res) {
 
         await client.connect();
 
-        // INSERT in jouw tabel "videos" as binary (bytea).
-        // Convert buffer to hex and use decode(..., 'hex') so Postgres receives bytea,
-        // avoiding UTF-8 encoding errors when the column is not text-safe.
-        const videoHex = videoBuffer.toString("hex");
+        // INSERT in jouw tabel "videos"
         await client.query(
-          "INSERT INTO videos (file) VALUES (decode($1, 'hex'))",
-          [videoHex]
+          "INSERT INTO videos (file) VALUES ($1)",
+          [videoBuffer]
         );
 
         await client.end();
@@ -134,7 +131,6 @@ attachments: [
     filename: "excuses.webm",
     content: attachmentBase64,
     type: "video/webm",
-    disposition: "attachment",
   },
 ],
 
