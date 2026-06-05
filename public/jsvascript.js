@@ -168,22 +168,41 @@ function startRecording() {
   });
 
   mediaRecorder.ondataavailable = (e) => {
+    console.log('Data available:', e.data.size, 'bytes');
     if (e.data.size > 0) {
       recordedChunks.push(e.data);
     }
   };
 
   mediaRecorder.onstop = () => {
+    console.log('MediaRecorder stopped. Total chunks:', recordedChunks.length);
+    const totalSize = recordedChunks.reduce((sum, chunk) => sum + chunk.size, 0);
+    console.log('Total video size:', totalSize, 'bytes');
+    
+    if (totalSize === 0) {
+      console.error('ERROR: Video blob is empty!');
+      showUploadError('Video opname was leeg. Controleer je camera en microfoon.');
+      return;
+    }
+    
     const blob = new Blob(recordedChunks, { type: 'video/webm' });
+    console.log('Created blob:', blob.size, 'bytes, type:', blob.type);
     uploadVideo(blob);
   };
 
-  mediaRecorder.start();
+  mediaRecorder.onerror = (e) => {
+    console.error('MediaRecorder error:', e.error);
+  };
+
+  mediaRecorder.start(100); // Request dataavailable events every 100ms
   setTimeout(stopRecording, 10000);
 }
 
 function stopRecording() {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
+    // Force one final dataavailable event to capture remaining data
+    mediaRecorder.requestData();
+    // Then stop the recording
     mediaRecorder.stop();
   }
 }
@@ -192,6 +211,19 @@ function stopRecording() {
 async function uploadVideo(blob) {
   state = 'uploading';
   showThinking();
+  
+  console.log('Uploading blob:', {
+    size: blob.size,
+    type: blob.type,
+    isEmpty: blob.size === 0
+  });
+  
+  if (blob.size === 0) {
+    console.error('ERROR: Cannot upload empty blob!');
+    hideLoadingBar();
+    showUploadError('Video is leeg. Probeer opnieuw.');
+    return;
+  }
 
   const formData = new FormData();
   formData.append('video', blob, 'excuses.webm');

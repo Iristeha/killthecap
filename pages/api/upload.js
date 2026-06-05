@@ -69,8 +69,24 @@ export default async function handler(req, res) {
       let client;
 
       try {
+        // Controleer bestandsgrootte
+        const fileStats = fs.statSync(videoPath);
+        console.log("Upload file stats:", {
+          path: videoPath,
+          size: fileStats.size,
+          isEmpty: fileStats.size === 0
+        });
+        
+        if (fileStats.size === 0) {
+          console.error("ERROR: Uploaded file is empty!");
+          res.status(400).json({ error: "Uploaded video file is empty. Ensure the recording captured audio/video." });
+          resolve();
+          return;
+        }
+        
         // Lees de video in als buffer
         const videoBuffer = fs.readFileSync(videoPath);
+        console.log("VideoBuffer size:", videoBuffer.length, "bytes");
 
         // Railway connectie
         client = new Client({
@@ -122,7 +138,14 @@ async function sendEmailWithVideo(videoBuffer) {
   });
 
   const resend = new Resend(apiKey);
+  
+  // Convert buffer to base64
   const attachmentBase64 = videoBuffer.toString("base64");
+  console.log("Email attachment base64 length:", attachmentBase64.length, "characters");
+  
+  if (!attachmentBase64 || attachmentBase64.length === 0) {
+    throw new Error("Base64 encoding failed: empty result");
+  }
 
   try {
     const response = await resend.emails.send({
@@ -132,14 +155,14 @@ async function sendEmailWithVideo(videoBuffer) {
       html: `
         <h2>Nieuwe excuses-video</h2>
         <p>Er is een nieuwe video met excuses geüpload naar je systeem.</p>
-        <p>De video is bijgesloten.</p>
+        <p>De video is bijgesloten als WebM-bestand.</p>
+        <p><em>Opmerking: Open het bestand met een videospeler die WebM ondersteunt (bijvoorbeeld VLC Media Player)</em></p>
       `,
       attachments: [
         {
           filename: "excuses.webm",
           content: attachmentBase64,
-          type: "video/webm",
-          disposition: "attachment",
+          encoding: "base64",
         },
       ],
     });
