@@ -72,7 +72,7 @@ function setupKeyboardListener() {
 // === READY STATE ===
 function showReadyState() {
   state = 'ready';
-  overlayText.textContent = 'Druk SPATIEBALK om te beginnen';
+  overlayText.textContent = 'Ga op de mat staan om te beginnen';
   subText.textContent = '';
 }
 
