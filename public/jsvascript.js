@@ -20,10 +20,18 @@ if (document.readyState === 'loading') {
 }
 
 async function init() {
-  await startCamera();
+  // Eerst alleen de listeners setup, camera nog NIET starten
   setupSpeechRecognition();
   setupKeyboardListener();
   showReadyState();
+  console.log('App initialized (camera will start later)');
+}
+
+async function ensureCameraStarted() {
+  if (!stream) {
+    console.log('Starting camera on demand...');
+    await startCamera();
+  }
 }
 
 // === CAMERA ===
@@ -35,10 +43,53 @@ async function startCamera() {
     });
     video.srcObject = stream;
     video.classList.add('blurred');
+    
+    // Debug: controleer of stream tracks actief zijn
+    const videoTracks = stream.getVideoTracks();
+    const audioTracks = stream.getAudioTracks();
+    console.log('Stream initialized:', {
+      videoTracks: videoTracks.length,
+      audioTracks: audioTracks.length,
+      videoEnabled: videoTracks[0]?.enabled,
+      audioEnabled: audioTracks[0]?.enabled
+    });
   } catch (err) {
     console.error('Camera/microfoon fout:', err);
     overlayText.textContent = 'Camera of microfoon niet beschikbaar';
     subText.textContent = 'Sta toegang toe in je browserinstellingen.';
+  }
+}
+
+async function ensureStreamActive() {
+  // Check of stream nog actief is, anders herstarten
+  if (!stream) {
+    console.warn('Stream is null, restarting camera...');
+    await startCamera();
+    return;
+  }
+  
+  const videoTracks = stream.getVideoTracks();
+  const audioTracks = stream.getAudioTracks();
+  
+  const videoActive = videoTracks.length > 0 && videoTracks[0].enabled && videoTracks[0].readyState === 'live';
+  const audioActive = audioTracks.length > 0 && audioTracks[0].enabled && audioTracks[0].readyState === 'live';
+  
+  console.log('Stream check before recording:', {
+    videoActive,
+    audioActive,
+    videoTracks: videoTracks.length,
+    audioTracks: audioTracks.length
+  });
+  
+  if (!videoActive || !audioActive) {
+    console.error('Stream lost or inactive, restarting...');
+    // Stop oude stream
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+    }
+    // Herstarten
+    await startCamera();
+    await new Promise(resolve => setTimeout(resolve, 500)); // Wacht op stream-stabilisering
   }
 }
 
@@ -131,8 +182,16 @@ function showApologyIntro() {
   state = 'apology_intro';
   overlayText.textContent = 'Tijd om je excuses aan te bieden.';
   subText.textContent = 'De opname start zo.';
-  video.classList.remove('blurred');
-  setTimeout(startCountdown, 2000);
+  
+  // Zorg dat camera actief is voordat we hem tonen
+  ensureCameraStarted().then(() => {
+    video.classList.remove('blurred');
+    setTimeout(startCountdown, 2000);
+  }).catch(err => {
+    console.error('Failed to start camera:', err);
+    overlayText.textContent = 'Camera kon niet starten.';
+    subText.textContent = 'Controleer je instellingen en probeer opnieuw.';
+  });
 }
 
 // === STEP 4: COUNTDOWN ===
@@ -159,42 +218,78 @@ function startCountdown() {
 }
 
 // === STEP 5: RECORDING ===
-function startRecording() {
+async function startRecording() {
   state = 'recording';
   recordedChunks = [];
+
+  // KRITIEK: Check dat stream actief is voordat we recording starten
+  await ensureStreamActive();
+
+  const videoTracks = stream.getVideoTracks();
+  const audioTracks = stream.getAudioTracks();
+  
+  console.log('Starting MediaRecorder with stream:', {
+    streamActive: stream !== null,
+    videoTracksCount: videoTracks.length,
+    audioTracksCount: audioTracks.length,
+    videoTrackState: videoTracks[0]?.readyState,
+    audioTrackState: audioTracks[0]?.readyState
+  });
 
   mediaRecorder = new MediaRecorder(stream, {
     mimeType: 'video/webm;codecs=vp8,opus'
   });
 
   mediaRecorder.ondataavailable = (e) => {
-    console.log('Data available:', e.data.size, 'bytes');
+    console.log('Data available:', {
+      bytes: e.data.size,
+      chunkCount: recordedChunks.length + 1,
+      isEmpty: e.data.size === 0
+    });
     if (e.data.size > 0) {
       recordedChunks.push(e.data);
+    } else {
+      console.warn('⚠️ Empty chunk received - stream may not have data');
     }
   };
 
   mediaRecorder.onstop = () => {
-    console.log('MediaRecorder stopped. Total chunks:', recordedChunks.length);
+    console.log('=== RECORDING STOPPED ===');
+    console.log('Total chunks collected:', recordedChunks.length);
     const totalSize = recordedChunks.reduce((sum, chunk) => sum + chunk.size, 0);
     console.log('Total video size:', totalSize, 'bytes');
     
+    // Detailleerde chunk info
+    recordedChunks.forEach((chunk, idx) => {
+      console.log(`  Chunk ${idx}: ${chunk.size} bytes, type: ${chunk.type}`);
+    });
+    
     if (totalSize === 0) {
-      console.error('ERROR: Video blob is empty!');
-      showUploadError('Video opname was leeg. Controleer je camera en microfoon.');
+      console.error('❌ KRITISCHE FOUT: Video blob is volledig leeg!');
+      console.error('Dit duidt op:');
+      console.error('  - Stream had geen audio/video data');
+      console.error('  - MediaRecorder kon niet worden gestart');
+      console.error('  - Tracks waren niet actief');
+      showUploadError('Video opname was leeg. Zorg dat camera/microfoon actief zijn.');
       return;
     }
     
     const blob = new Blob(recordedChunks, { type: 'video/webm' });
-    console.log('Created blob:', blob.size, 'bytes, type:', blob.type);
+    console.log('✅ Blob created successfully:', {
+      blobSize: blob.size,
+      blobType: blob.type,
+      chunkCount: recordedChunks.length
+    });
     uploadVideo(blob);
   };
 
   mediaRecorder.onerror = (e) => {
-    console.error('MediaRecorder error:', e.error);
+    console.error('❌ MediaRecorder error:', e.error);
   };
 
+  console.log('MediaRecorder state:', mediaRecorder.state);
   mediaRecorder.start(100); // Request dataavailable events every 100ms
+  console.log('Recording started, will stop in 10 seconds...');
   setTimeout(stopRecording, 10000);
 }
 
@@ -212,26 +307,43 @@ async function uploadVideo(blob) {
   state = 'uploading';
   showThinking();
   
-  console.log('Uploading blob:', {
+  console.log('📤 UPLOAD STARTING');
+  console.log('Blob details:', {
     size: blob.size,
     type: blob.type,
     isEmpty: blob.size === 0
   });
   
   if (blob.size === 0) {
-    console.error('ERROR: Cannot upload empty blob!');
+    console.error('❌ KRITIEKE FOUT: Cannot upload empty blob!');
     hideLoadingBar();
-    showUploadError('Video is leeg. Probeer opnieuw.');
+    showUploadError('Video is leeg. Dit mag niet voorkomen - check je camera.');
     return;
   }
 
   const formData = new FormData();
   formData.append('video', blob, 'excuses.webm');
+  
+  // Controleer FormData inhoud (kan niet rechtstreeks gelezen, maar we weten wat we toevoegden)
+  console.log('FormData prepared with:', {
+    field: 'video',
+    filename: 'excuses.webm',
+    blobSize: blob.size,
+    blobType: blob.type
+  });
 
   try {
+    console.log('Sending POST request to /api/upload...');
     const response = await fetch('/api/upload', {
       method: 'POST',
       body: formData,
+      // Headers worden automatisch gezet door browser met boundary
+    });
+
+    console.log('📥 Response received:', {
+      status: response.status,
+      statusText: response.statusText,
+      contentType: response.headers.get('content-type')
     });
 
     let data;
@@ -239,23 +351,25 @@ async function uploadVideo(blob) {
       data = await response.json();
     } catch (jsonError) {
       const text = await response.text();
-      console.error('Upload fout: response parse error', jsonError, text);
+      console.error('❌ Upload fout: response parse error', jsonError);
+      console.error('Response text:', text);
       hideLoadingBar();
       showUploadError();
       return;
     }
 
     hideLoadingBar();
-    console.log('Upload response', response.status, data);
+    console.log('Upload response data:', data);
 
     if (response.ok && data.success) {
+      console.log('✅ Upload succeeded!');
       showUploadComplete();
     } else {
-      console.error('Upload fout:', data);
+      console.error('❌ Upload fout:', data);
       showUploadError(data.error || 'Serverfout');
     }
   } catch (err) {
-    console.error('Upload fout:', err);
+    console.error('❌ Upload network error:', err);
     hideLoadingBar();
     showUploadError();
   }
