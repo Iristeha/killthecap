@@ -74,11 +74,12 @@ export default async function handler(req, res) {
       let client;
 
       try {
-        // Controleer bestandsgrootte
+        // Controleer bestandsgrootte EN integriteit
         const fileStats = fs.statSync(videoPath);
         console.log("📊 [SERVER] Upload file stats:", {
           path: videoPath,
           size: fileStats.size,
+          sizeKB: (fileStats.size / 1024).toFixed(2),
           isEmpty: fileStats.size === 0
         });
         
@@ -92,6 +93,15 @@ export default async function handler(req, res) {
         // Lees de video in als buffer
         const videoBuffer = fs.readFileSync(videoPath);
         console.log("📊 [SERVER] VideoBuffer size:", videoBuffer.length, "bytes");
+        
+        // Controleer WebM bestand signature (WebM files start with "1A 45 DF A3")
+        const webmSignature = videoBuffer.slice(0, 4).toString('hex');
+        console.log("📝 [SERVER] WebM file signature:", webmSignature);
+        
+        if (webmSignature !== '1a45dfa3') {
+          console.warn("⚠️  [SERVER] WARNING: File may not be valid WebM format!");
+          console.warn("Expected: 1a45dfa3, Got:", webmSignature);
+        }
         
         if (videoBuffer.length === 0) {
           console.error("❌ [SERVER] KRITIEKE FOUT: VideoBuffer is empty!");
@@ -112,11 +122,11 @@ export default async function handler(req, res) {
 
         // INSERT in jouw tabel "videos"
         console.log("💾 [SERVER] Inserting video into database...");
-        await client.query(
-          "INSERT INTO videos (file) VALUES ($1)",
+        const insertResult = await client.query(
+          "INSERT INTO videos (file) VALUES ($1) RETURNING id",
           [videoBuffer]
         );
-        console.log("✅ [SERVER] Video inserted into database");
+        console.log("✅ [SERVER] Video inserted into database with ID:", insertResult.rows[0].id);
 
         await client.end();
 
@@ -125,7 +135,12 @@ export default async function handler(req, res) {
         await sendEmailWithVideo(videoBuffer);
         console.log("✅ [SERVER] Email sent successfully");
 
-        res.status(200).json({ success: true, message: "Video uploaded and email sent" });
+        res.status(200).json({ 
+          success: true, 
+          message: "Video uploaded and email sent",
+          videoId: insertResult.rows[0].id,
+          videoSize: videoBuffer.length
+        });
         resolve();
       } catch (error) {
         console.error("❌ [SERVER] Processing error:", error);
@@ -152,6 +167,7 @@ async function sendEmailWithVideo(videoBuffer) {
   console.log("📧 [RESEND] Email send starting with:", {
     hasKey: Boolean(apiKey),
     bufferSize: videoBuffer.length,
+    bufferSizeMB: (videoBuffer.length / 1024 / 1024).toFixed(2),
   });
 
   const resend = new Resend(apiKey);
@@ -161,6 +177,7 @@ async function sendEmailWithVideo(videoBuffer) {
   console.log("📧 [RESEND] Base64 encoded:", {
     base64Length: attachmentBase64.length,
     originalSize: videoBuffer.length,
+    compressionRatio: (attachmentBase64.length / videoBuffer.length).toFixed(2),
     isEmpty: attachmentBase64.length === 0,
   });
   
@@ -168,8 +185,22 @@ async function sendEmailWithVideo(videoBuffer) {
     throw new Error("Base64 encoding failed: empty result");
   }
 
+  // Controleer dat base64 enkel geldige characters bevat
+  const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+  if (!base64Regex.test(attachmentBase64)) {
+    console.error("❌ [RESEND] Invalid base64 encoding detected!");
+    throw new Error("Base64 string contains invalid characters");
+  }
+  console.log("✅ [RESEND] Base64 string is valid");
+
   try {
     console.log("📧 [RESEND] Sending email to:", RECIPIENT_EMAIL);
+    console.log("📧 [RESEND] Attachment details:", {
+      filename: "excuses.webm",
+      base64Length: attachmentBase64.length,
+      encodingMethod: "base64",
+    });
+
     const response = await resend.emails.send({
       from: "Spiegel van de Leugen <onboarding@resend.dev>",
       to: RECIPIENT_EMAIL,
@@ -177,9 +208,14 @@ async function sendEmailWithVideo(videoBuffer) {
       html: `
         <h2>Nieuwe excuses-video</h2>
         <p>Er is een nieuwe video met excuses geüpload naar je systeem.</p>
-        <p>Videogrootte: ${videoBuffer.length} bytes</p>
+        <p><strong>Videodetails:</strong></p>
+        <ul>
+          <li>Bestandsgrootte: ${(videoBuffer.length / 1024 / 1024).toFixed(2)} MB</li>
+          <li>Bestandstype: WebM (video/webm)</li>
+          <li>Geïncludeerd als attachment</li>
+        </ul>
         <p>De video is bijgesloten als WebM-bestand.</p>
-        <p><em>Opmerking: Open het bestand met een videospeler die WebM ondersteunt (bijvoorbeeld VLC Media Player)</em></p>
+        <p><em>Opmerking: Open het bestand met een videospeler die WebM ondersteunt (bijvoorbeeld VLC Media Player, Google Chrome, Firefox)</em></p>
       `,
       attachments: [
         {
@@ -190,12 +226,22 @@ async function sendEmailWithVideo(videoBuffer) {
       ],
     });
 
-    console.log("✅ [RESEND] Email sent successfully:", response);
+    console.log("✅ [RESEND] Email sent successfully!");
+    console.log("📧 [RESEND] Response:", {
+      id: response.id,
+      from: response.from,
+      to: response.to,
+      created_at: response.created_at,
+    });
     return response;
   } catch (err) {
     console.error("❌ [RESEND] Email send failed:", err?.message || err);
     if (err?.response) {
-      console.error("Resend response body:", err.response);
+      console.error("❌ [RESEND] Response body:", err.response);
+    }
+    if (err?.message?.includes("413")) {
+      console.error("❌ [RESEND] File too large for email attachment!");
+      throw new Error(`Resend API error: Attachment too large (${(videoBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
     }
     throw new Error(`Resend API error: ${err?.message || "Unknown error"}`);
   }

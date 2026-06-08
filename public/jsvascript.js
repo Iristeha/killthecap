@@ -228,7 +228,7 @@ async function startRecording() {
   const videoTracks = stream.getVideoTracks();
   const audioTracks = stream.getAudioTracks();
   
-  console.log('Starting MediaRecorder with stream:', {
+  console.log('🎥 Starting MediaRecorder with stream:', {
     streamActive: stream !== null,
     videoTracksCount: videoTracks.length,
     audioTracksCount: audioTracks.length,
@@ -236,25 +236,43 @@ async function startRecording() {
     audioTrackState: audioTracks[0]?.readyState
   });
 
+  // Probeer verschiedene MIME types totdat er één werkt
+  let mimeType = 'video/webm';
+  const supportedMimeTypes = [
+    'video/webm;codecs=vp8,opus',
+    'video/webm;codecs=vp8',
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=h264',
+    'video/webm'
+  ];
+
+  for (const type of supportedMimeTypes) {
+    if (MediaRecorder.isTypeSupported(type)) {
+      mimeType = type;
+      console.log('✅ Using supported MIME type:', mimeType);
+      break;
+    }
+  }
+  console.log('📝 Final MIME type selected:', mimeType);
+
   mediaRecorder = new MediaRecorder(stream, {
-    mimeType: 'video/webm;codecs=vp8,opus'
+    mimeType: mimeType
   });
 
+  let chunkCount = 0;
+
   mediaRecorder.ondataavailable = (e) => {
-    console.log('Data available:', {
-      bytes: e.data.size,
-      chunkCount: recordedChunks.length + 1,
-      isEmpty: e.data.size === 0
-    });
+    chunkCount++;
+    console.log(`📦 Chunk ${chunkCount}: ${e.data.size} bytes, type: ${e.data.type}`);
     if (e.data.size > 0) {
       recordedChunks.push(e.data);
     } else {
-      console.warn('⚠️ Empty chunk received - stream may not have data');
+      console.warn(`⚠️  Chunk ${chunkCount} is empty`);
     }
   };
 
   mediaRecorder.onstop = () => {
-    console.log('=== RECORDING STOPPED ===');
+    console.log('\n=== 🛑 RECORDING STOPPED ===');
     console.log('Total chunks collected:', recordedChunks.length);
     const totalSize = recordedChunks.reduce((sum, chunk) => sum + chunk.size, 0);
     console.log('Total video size:', totalSize, 'bytes');
@@ -274,31 +292,73 @@ async function startRecording() {
       return;
     }
     
-    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+    if (recordedChunks.length === 0) {
+      console.error('❌ KRITISCHE FOUT: Geen chunks ontvangen!');
+      showUploadError('Video opname was beschadigd. Probeer opnieuw.');
+      return;
+    }
+    
+    // Waarschuwing als video te klein is (waarschijnlijk beschadigd)
+    const MIN_VIDEO_SIZE = 50 * 1024; // 50KB minimum
+    if (totalSize < MIN_VIDEO_SIZE) {
+      console.warn(`⚠️ WAARSCHUWING: Video is zeer klein (${totalSize} bytes)`);
+      console.warn('Dit kan betekenen dat de opname niet goed is gestart.');
+      console.warn('De video wordt toch geüpload, maar controleer de kwaliteit.');
+    }
+    
+    const blob = new Blob(recordedChunks, { type: mimeType });
     console.log('✅ Blob created successfully:', {
       blobSize: blob.size,
       blobType: blob.type,
-      chunkCount: recordedChunks.length
+      chunkCount: recordedChunks.length,
+      blobSizeKB: (blob.size / 1024).toFixed(2),
+      estimatedDurationSeconds: Math.round(blob.size / 128000) // Rough estimate
     });
-    uploadVideo(blob);
+    
+    // Controleer WebM signature in blob (eerste 4 bytes moeten "1A 45 DF A3" zijn)
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const uint8 = new Uint8Array(e.target.result);
+      const headerHex = Array.from(uint8.slice(0, 4))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+      console.log('📝 WebM blob header signature:', headerHex);
+      
+      if (headerHex !== '1a45dfa3') {
+        console.warn('⚠️ WebM header may be invalid! Expected: 1a45dfa3, Got:', headerHex);
+      } else {
+        console.log('✅ WebM header is valid!');
+      }
+      
+      uploadVideo(blob);
+    };
+    reader.onerror = () => {
+      console.warn('Could not read blob header, proceeding with upload anyway');
+      uploadVideo(blob);
+    };
+    reader.readAsArrayBuffer(blob.slice(0, 4));
   };
 
   mediaRecorder.onerror = (e) => {
     console.error('❌ MediaRecorder error:', e.error);
   };
 
-  console.log('MediaRecorder state:', mediaRecorder.state);
+  console.log('🎬 MediaRecorder state:', mediaRecorder.state);
   mediaRecorder.start(100); // Request dataavailable events every 100ms
-  console.log('Recording started, will stop in 10 seconds...');
+  console.log('🎥 Recording started, will stop in 10 seconds...');
   setTimeout(stopRecording, 10000);
 }
 
 function stopRecording() {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
+    console.log('⏱️ Stopping recorder...');
     // Force one final dataavailable event to capture remaining data
     mediaRecorder.requestData();
-    // Then stop the recording
-    mediaRecorder.stop();
+    // Wait a tiny bit, then stop
+    setTimeout(() => {
+      mediaRecorder.stop();
+      console.log('⏹️ Stop command sent');
+    }, 50);
   }
 }
 
@@ -307,9 +367,10 @@ async function uploadVideo(blob) {
   state = 'uploading';
   showThinking();
   
-  console.log('📤 UPLOAD STARTING');
+  console.log('\n📤 ===== UPLOAD STARTING =====');
   console.log('Blob details:', {
     size: blob.size,
+    sizeKB: (blob.size / 1024).toFixed(2),
     type: blob.type,
     isEmpty: blob.size === 0
   });
@@ -321,10 +382,20 @@ async function uploadVideo(blob) {
     return;
   }
 
+  // Zorg dat het blob type correct is
+  if (!blob.type || blob.type === '') {
+    console.warn('⚠️ Blob type is empty, setting to video/webm');
+    blob = blob.slice(0, blob.size, 'video/webm');
+  }
+
+  // DEBUG: Maak lokale preview link (alleen in dev mode)
+  const blobUrl = URL.createObjectURL(blob);
+  console.log('🔗 DEBUG: Local blob preview (can save to test):', blobUrl);
+  console.log('   Kun je dit gebruiken om het bestand lokaal te testen met video elementen');
+
   const formData = new FormData();
   formData.append('video', blob, 'excuses.webm');
   
-  // Controleer FormData inhoud (kan niet rechtstreeks gelezen, maar we weten wat we toevoegden)
   console.log('FormData prepared with:', {
     field: 'video',
     filename: 'excuses.webm',
@@ -334,35 +405,50 @@ async function uploadVideo(blob) {
 
   try {
     console.log('Sending POST request to /api/upload...');
+    const startTime = Date.now();
+    
     const response = await fetch('/api/upload', {
       method: 'POST',
       body: formData,
       // Headers worden automatisch gezet door browser met boundary
     });
 
+    const uploadTime = Date.now() - startTime;
     console.log('📥 Response received:', {
       status: response.status,
       statusText: response.statusText,
-      contentType: response.headers.get('content-type')
+      contentType: response.headers.get('content-type'),
+      uploadTimeMs: uploadTime
     });
 
     let data;
     try {
       data = await response.json();
+      console.log('Response parsed:', data);
     } catch (jsonError) {
       const text = await response.text();
       console.error('❌ Upload fout: response parse error', jsonError);
-      console.error('Response text:', text);
+      console.error('Response text:', text.substring(0, 500));
       hideLoadingBar();
-      showUploadError();
+      showUploadError('Server fout: kon antwoord niet lezen');
       return;
     }
 
     hideLoadingBar();
-    console.log('Upload response data:', data);
+    
+    // Cleanup blob URL
+    URL.revokeObjectURL(blobUrl);
 
     if (response.ok && data.success) {
       console.log('✅ Upload succeeded!');
+      console.log('Server message:', data.message);
+      console.log('Video ID:', data.videoId);
+      console.log('Video size on server:', data.videoSize, 'bytes');
+      
+      // Sla video ID op voor debugging
+      window.lastVideoId = data.videoId;
+      console.log(`🔗 DEBUG: Download video met: /api/download?id=${data.videoId}`);
+      
       showUploadComplete();
     } else {
       console.error('❌ Upload fout:', data);
@@ -370,8 +456,9 @@ async function uploadVideo(blob) {
     }
   } catch (err) {
     console.error('❌ Upload network error:', err);
+    console.error('Error details:', err.message);
     hideLoadingBar();
-    showUploadError();
+    showUploadError('Netwerkfout: controleer je verbinding');
   }
 }
 
@@ -380,6 +467,14 @@ function showUploadComplete() {
   overlayText.textContent = 'Je wordt teruggestuurd.';
   subText.textContent = 'Je video is geüpload en verstuurd.';
   flowActive = false;
+  
+  // Log voor debugging
+  console.log('✅ UPLOAD COMPLETED SUCCESSFULLY');
+  console.log('Video ID:', window.lastVideoId || 'unknown');
+  if (window.lastVideoId) {
+    console.log(`Debug: Download via: /api/download?id=${window.lastVideoId}`);
+  }
+  
   setTimeout(showReadyState, 5000);
 }
 
