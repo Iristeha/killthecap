@@ -126,19 +126,20 @@ export default async function handler(req, res) {
           "INSERT INTO videos (file) VALUES ($1) RETURNING id",
           [videoBuffer]
         );
-        console.log("✅ [SERVER] Video inserted into database with ID:", insertResult.rows[0].id);
+        const videoId = insertResult.rows[0].id;
+        console.log("✅ [SERVER] Video inserted into database with ID:", videoId);
 
         await client.end();
 
-        // Stuur email met video
-        console.log("📧 [SERVER] Sending email with video...");
-        await sendEmailWithVideo(videoBuffer);
+        // Stuur email met DOWNLOAD LINK (niet als attachment, te groot!)
+        console.log("📧 [SERVER] Sending email with download link...");
+        await sendEmailWithDownloadLink(videoId, videoBuffer.length);
         console.log("✅ [SERVER] Email sent successfully");
 
         res.status(200).json({ 
           success: true, 
           message: "Video uploaded and email sent",
-          videoId: insertResult.rows[0].id,
+          videoId: videoId,
           videoSize: videoBuffer.length
         });
         resolve();
@@ -158,72 +159,51 @@ export default async function handler(req, res) {
   });
 }
 
-async function sendEmailWithVideo(videoBuffer) {
+async function sendEmailWithDownloadLink(videoId, videoSize) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     throw new Error("RESEND_API_KEY is not configured");
   }
 
-  console.log("📧 [RESEND] Email send starting with:", {
-    hasKey: Boolean(apiKey),
-    bufferSize: videoBuffer.length,
-    bufferSizeMB: (videoBuffer.length / 1024 / 1024).toFixed(2),
+  console.log("📧 [RESEND] Email send starting:", {
+    videoId,
+    videoSize,
+    videoSizeMB: (videoSize / 1024 / 1024).toFixed(2),
   });
 
   const resend = new Resend(apiKey);
   
-  // Convert buffer to base64
-  const attachmentBase64 = videoBuffer.toString("base64");
-  console.log("📧 [RESEND] Base64 encoded:", {
-    base64Length: attachmentBase64.length,
-    originalSize: videoBuffer.length,
-    compressionRatio: (attachmentBase64.length / videoBuffer.length).toFixed(2),
-    isEmpty: attachmentBase64.length === 0,
-  });
-  
-  if (!attachmentBase64 || attachmentBase64.length === 0) {
-    throw new Error("Base64 encoding failed: empty result");
-  }
-
-  // Controleer dat base64 enkel geldige characters bevat
-  const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
-  if (!base64Regex.test(attachmentBase64)) {
-    console.error("❌ [RESEND] Invalid base64 encoding detected!");
-    throw new Error("Base64 string contains invalid characters");
-  }
-  console.log("✅ [RESEND] Base64 string is valid");
+  // Maak download URL (aanpassen naar je production domain)
+  const downloadUrl = `https://killthecap.vercel.app/api/download?id=${videoId}`;
+  console.log("🔗 [RESEND] Download URL:", downloadUrl);
 
   try {
-    console.log("📧 [RESEND] Sending email to:", RECIPIENT_EMAIL);
-    console.log("📧 [RESEND] Attachment details:", {
-      filename: "excuses.webm",
-      base64Length: attachmentBase64.length,
-      encodingMethod: "base64",
-    });
+    console.log("📧 [RESEND] Sending email with download link to:", RECIPIENT_EMAIL);
 
     const response = await resend.emails.send({
       from: "Spiegel van de Leugen <onboarding@resend.dev>",
       to: RECIPIENT_EMAIL,
-      subject: "Nieuwe excuses-video geüpload",
+      subject: "Nieuwe excuses-video geüpload - Download beschikbaar",
       html: `
         <h2>Nieuwe excuses-video</h2>
         <p>Er is een nieuwe video met excuses geüpload naar je systeem.</p>
+        
         <p><strong>Videodetails:</strong></p>
         <ul>
-          <li>Bestandsgrootte: ${(videoBuffer.length / 1024 / 1024).toFixed(2)} MB</li>
+          <li>Bestandsgrootte: ${(videoSize / 1024 / 1024).toFixed(2)} MB</li>
           <li>Bestandstype: WebM (video/webm)</li>
-          <li>Geïncludeerd als attachment</li>
+          <li>Video ID: ${videoId}</li>
         </ul>
-        <p>De video is bijgesloten als WebM-bestand.</p>
+        
+        <p><strong>Download je video:</strong></p>
+        <p><a href="${downloadUrl}" style="background-color: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">📥 Download Video (${(videoSize / 1024 / 1024).toFixed(2)} MB)</a></p>
+        
+        <p>Of kopieer deze URL:</p>
+        <p><code>${downloadUrl}</code></p>
+        
+        <p><em>De download link is 30 dagen geldig.</em></p>
         <p><em>Opmerking: Open het bestand met een videospeler die WebM ondersteunt (bijvoorbeeld VLC Media Player, Google Chrome, Firefox)</em></p>
       `,
-      attachments: [
-        {
-          filename: "excuses.webm",
-          content: attachmentBase64,
-          encoding: "base64",
-        },
-      ],
     });
 
     console.log("✅ [RESEND] Email sent successfully!");
@@ -238,10 +218,6 @@ async function sendEmailWithVideo(videoBuffer) {
     console.error("❌ [RESEND] Email send failed:", err?.message || err);
     if (err?.response) {
       console.error("❌ [RESEND] Response body:", err.response);
-    }
-    if (err?.message?.includes("413")) {
-      console.error("❌ [RESEND] File too large for email attachment!");
-      throw new Error(`Resend API error: Attachment too large (${(videoBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
     }
     throw new Error(`Resend API error: ${err?.message || "Unknown error"}`);
   }

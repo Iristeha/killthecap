@@ -20,18 +20,12 @@ if (document.readyState === 'loading') {
 }
 
 async function init() {
-  // Eerst alleen de listeners setup, camera nog NIET starten
+  console.log('🚀 App initializing...');
+  await startCamera();
   setupSpeechRecognition();
   setupKeyboardListener();
   showReadyState();
-  console.log('App initialized (camera will start later)');
-}
-
-async function ensureCameraStarted() {
-  if (!stream) {
-    console.log('Starting camera on demand...');
-    await startCamera();
-  }
+  console.log('✅ App initialized and ready');
 }
 
 // === CAMERA ===
@@ -182,16 +176,8 @@ function showApologyIntro() {
   state = 'apology_intro';
   overlayText.textContent = 'Tijd om je excuses aan te bieden.';
   subText.textContent = 'De opname start zo.';
-  
-  // Zorg dat camera actief is voordat we hem tonen
-  ensureCameraStarted().then(() => {
-    video.classList.remove('blurred');
-    setTimeout(startCountdown, 2000);
-  }).catch(err => {
-    console.error('Failed to start camera:', err);
-    overlayText.textContent = 'Camera kon niet starten.';
-    subText.textContent = 'Controleer je instellingen en probeer opnieuw.';
-  });
+  video.classList.remove('blurred');
+  setTimeout(startCountdown, 2000);
 }
 
 // === STEP 4: COUNTDOWN ===
